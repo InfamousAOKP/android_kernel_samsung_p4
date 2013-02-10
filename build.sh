@@ -6,7 +6,7 @@
 # Set basic parameters
 DATE_START=$(date +"%s")
 
-MACKAY_VER="Mackay_1.0"
+MACKAY_VER="Mackay_1.1"
 
 export ARCH=arm
 export LOCALVERSION="-"`echo $MACKAY_VER`
