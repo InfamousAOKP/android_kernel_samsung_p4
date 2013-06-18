@@ -37,11 +37,6 @@
 #include "modem_link_device_hsic.h"
 #include "modem_utils.h"
 
-/*grzwolf-beg*/
-   int g_timeout = 0;
-/*grzwolf-end*/
-
-
 static struct modem_ctl *if_usb_get_modemctl(struct link_pm_data *pm_data);
 static int link_pm_runtime_get_active(struct link_pm_data *pm_data);
 static int usb_tx_urb_with_skb(struct usb_device *usbdev, struct sk_buff *skb,
@@ -75,6 +70,12 @@ static int start_ipc(struct link_device *ld, struct io_device *iod)
 
 	if (!usb_ld->if_usb_connected) {
 		mif_err("HSIC not connected, skip start ipc\n");
+		err = -ENODEV;
+		goto exit;
+	}
+
+	if (ld->mc->phone_state != STATE_ONLINE) {
+		mif_err("[MODEM_IF] MODEM is not online, skip start ipc\n");
 		err = -ENODEV;
 		goto exit;
 	}
@@ -703,11 +704,17 @@ static void link_pm_reconnect_work(struct work_struct *work)
 					link_reconnect_work.work);
 	struct modem_ctl *mc = if_usb_get_modemctl(pm_data);
 
-	if (!mc || pm_data->usb_ld->if_usb_connected)
-		return;
+	mif_info("\n");
 
-	if (pm_data->usb_ld->ld.com_state != COM_ONLINE)
+	if (!mc || pm_data->usb_ld->if_usb_connected) {
+		mif_err("mc or if_usb_connected is invalid\n");
 		return;
+	}
+
+	if (pm_data->usb_ld->ld.com_state != COM_ONLINE) {
+		mif_err("com_state is not COM_ONLINE\n");
+		return;
+	}
 
 	if (pm_data->link_reconnect_cnt--) {
 		if (mc->phone_state == STATE_ONLINE &&
@@ -957,6 +964,7 @@ static int link_pm_notifier_event(struct notifier_block *this,
 {
 	struct link_pm_data *pm_data =
 			container_of(this, struct link_pm_data,	pm_notifier);
+	struct usb_device *usbdev = pm_data->usb_ld->usbdev;
 #ifdef CONFIG_UMTS_MODEM_XMM6262
 	struct modem_ctl *mc = if_usb_get_modemctl(pm_data);
 #endif
@@ -983,11 +991,12 @@ static int link_pm_notifier_event(struct notifier_block *this,
 		queue_delayed_work(pm_data->wq, &pm_data->link_pm_start, 0);
 		#endif
 		if (gpio_get_value(pm_data->gpio_link_hostwake)
-			!= HOSTWAKE_TRIGLEVEL) {
+			== HOSTWAKE_TRIGLEVEL) {
 			queue_delayed_work(pm_data->wq, &pm_data->link_pm_work,
 				0);
 			pr_info("%s: post resume\n", __func__);
 		}
+		usb_set_autosuspend_delay(usbdev, 200);
 		return NOTIFY_OK;
 	}
 	return NOTIFY_DONE;
@@ -1013,30 +1022,14 @@ static int if_usb_suspend(struct usb_interface *intf, pm_message_t message)
 	if (!devdata->disconnected && devdata->state == STATE_RESUMED) {
 		usb_kill_urb(devdata->urb);
 		devdata->state = STATE_SUSPENDED;
-/*grzwolf-beg*/
-                mif_info("if_usb_supend usb_kill_urb\n");
-/*grzwolf-end*/
 	}
 
 	devdata->usb_ld->suspended++;
 
-/*grzwolf-beg*/
 	if (devdata->usb_ld->suspended == LINKPM_DEV_NUM) {
 		mif_info("[if_usb_suspended]\n");
 		wake_lock_timeout(&pm_data->l2_wake, msecs_to_jiffies(50));
-//	}
-//	if ( devdata->usb_ld->suspended == LINKPM_DEV_NUM ) {
-//           g_timeout++;
-//           if ( (g_timeout % 2) != 0 ) {  // g_timeout is odd number  
-//              mif_info("[if_usb_suspended] - wake_lock_timeout sent\n"); 
-//  	      wake_lock_timeout(&pm_data->l2_wake, msecs_to_jiffies(50));
-//           } else {
-//              mif_info("[if_usb_suspended] - wake_lock_timeout suppressed\n"); 
-//           } 
-	} else {
-           mif_info("if_usb_supend NO SUSPEND: %i\t%i\n", devdata->usb_ld->suspended, LINKPM_DEV_NUM);
-        }
-/*grzwolf-end*/
+	}
 	return 0;
 }
 
@@ -1305,8 +1298,10 @@ static int __devinit if_usb_probe(struct usb_interface *intf,
 	}
 
 	/* HSIC main comm channel has been established */
-	if (pipe == IF_USB_CMD_EP)
+	if (pipe == IF_USB_CMD_EP) {
 		link_pm_change_modem_state(usb_ld->link_pm_data, STATE_ONLINE);
+		enable_irq(usb_ld->link_pm_data->irq_link_hostwake);
+	}
 
 	mif_info("successfully done\n");
 
@@ -1450,6 +1445,7 @@ static int usb_link_pm_init(struct usb_link_device *usb_ld, void *data)
 		mif_err("failed to enable_irq_wake:%d\n", r);
 		goto err_set_wake_irq;
 	}
+	disable_irq(pm_data->irq_link_hostwake);
 
 	/* create work queue & init work for runtime pm */
 	pm_data->wq = create_singlethread_workqueue("linkpmd");
