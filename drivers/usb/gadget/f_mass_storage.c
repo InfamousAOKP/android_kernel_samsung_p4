@@ -406,11 +406,6 @@ struct fsg_common {
 	 */
 	char inquiry_string[8 + 16 + 4 + 1];
 
-#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
-	char vendor_string[8 + 1];
-	char product_string[16 + 1];
-#endif
-
 	struct kref		ref;
 };
 
@@ -2192,7 +2187,7 @@ unknown_cmnd:
 		common->data_size_from_cmnd = 0;
 		sprintf(unknown, "Unknown x%02x", common->cmnd[0]);
 		reply = check_command(common, common->cmnd_size,
-				      DATA_DIR_UNKNOWN, 0xff, 0, unknown);
+				      DATA_DIR_UNKNOWN, ~0, 0, unknown);
 		if (reply == 0) {
 			common->curlun->sense_data = SS_INVALID_COMMAND;
 			reply = -EINVAL;
