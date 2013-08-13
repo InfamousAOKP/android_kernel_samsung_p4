@@ -88,6 +88,11 @@
 #ifdef CONFIG_KERNEL_DEBUG_SEC
 #include <linux/kernel_sec_common.h>
 #endif
+
+#if defined(CONFIG_SEC_KEYBOARD_DOCK)
+#include <linux/sec_keyboard_struct.h>
+#endif
+
 #if defined(CONFIG_TDMB) || defined(CONFIG_TDMB_MODULE)
 #include <mach/tdmb_pdata.h>
 #endif
@@ -173,6 +178,7 @@ static int write_bootloader_message(char *cmd, int mode)
 #ifdef CONFIG_KERNEL_DEBUG_SEC
 		reboot_mode = REBOOT_MODE_RECOVERY;
 		kernel_sec_set_debug_level(KERNEL_SEC_DEBUG_LEVEL_LOW);
+		kernel_sec_clear_upload_magic_number();
 #endif
 	} else if (mode == REBOOT_MODE_FASTBOOT)
 		strcpy(bootmsg.command, "boot-fastboot");
@@ -913,7 +919,7 @@ static void tegra_usb_ldo_en(int active, int instance)
 			if (ret == 0)
 				usb_data.usb_regulator_on[instance] = 1;
 			else
-				pr_err("%s: failed to turn on \\
+				pr_err("%s: failed to turn on \
 					vdd_ldo6 regulator\n", __func__);
 		}
 	} else {
@@ -1028,7 +1034,7 @@ static struct p3_battery_platform_data p3_battery_platform = {
 	.init_charger_gpio = p3_bat_gpio_init,
 	.inform_charger_connection = p3_inform_charger_connection,
 
-#ifdef CONFIG_TARGET_LOCALE_KOR
+#if defined(CONFIG_TARGET_LOCALE_KOR)
 	.temp_high_threshold = 60000,
 	/* 546 + 32 (dT) ->600 by kim2054's request*/
 	.temp_high_recovery = 42600,	/* 426 */
@@ -1037,7 +1043,7 @@ static struct p3_battery_platform_data p3_battery_platform = {
 	.charge_duration = 10*60*60,	/* 10 hour */
 	.recharge_duration = 2*60*60,	/* 2 hour */
 	.recharge_voltage = 4150,	/*4.15V */
-#elif CONFIG_MACH_SAMSUNG_P4TMO
+#elif defined(CONFIG_MACH_SAMSUNG_P4TMO)
 	.temp_high_threshold = 50000,	/* 50c */
 	.temp_high_recovery = 45000,	/* 45c */
 	.temp_low_recovery = 2000,		/* 2c */
@@ -1064,49 +1070,84 @@ static struct platform_device p3_battery_device = {
 	},
 };
 #ifdef CONFIG_SEC_KEYBOARD_DOCK
-static struct sec_keyboard_callbacks *keyboard_callbacks;
-static int check_sec_keyboard_dock(bool attached)
+#if 0
+struct uart_platform_data {
+        void(*send_to_keyboard)(unsigned int val);
+};
+
+struct kbd_callbacks {
+        void (*get_data)(struct kbd_callbacks *, unsigned int val);
+#if 0
+        int (*check_keyboard_dock)(struct kbd_callbacks *, int val);
+#endif
+};
+
+static struct kbd_callbacks sec_kdb_cb;
+
+static void uart_to_keyboard(unsigned int val)
 {
-	if (keyboard_callbacks && keyboard_callbacks->check_keyboard_dock)
-		return keyboard_callbacks->
-			check_keyboard_dock(keyboard_callbacks, attached);
-	return 0;
+        if (sec_kdb_cb && sec_kdb_cb->get_data)
+                sec_kdb_cb->get_data(sec_kdb_cb, val);
 }
 
-static void check_uart_path(bool en)
+static int check_keyboard(struct kbd_callbacks *, int val)
 {
-	int gpio_uart_sel;
-	gpio_uart_sel = GPIO_UART_SEL;
-
-	if (en)
-		gpio_direction_output(gpio_uart_sel, 1);
-	else
-		gpio_direction_output(gpio_uart_sel, 0);
-
-	printk(KERN_DEBUG "[Keyboard] uart_sel : %d\n",
-		gpio_get_value(gpio_uart_sel));
+        if (sec_kdb_cb && sec_kdb_cb->check_keyboard_dock)
+                return sec_kdb_cb->check_keyboard_dock(sec_kdb_cb, val);
+        return 0;
 }
 
-static void sec_keyboard_register_cb(struct sec_keyboard_callbacks *cb)
+static void sec_keyboard_register_callbacks(struct kbd_callbacks *cb)
 {
-	keyboard_callbacks = cb;
+        sec_kdb_cb = cb;
 }
 
-static struct sec_keyboard_platform_data kbd_pdata = {
-	.accessory_irq_gpio = GPIO_ACCESSORY_INT,
-	.acc_power = tegra_acc_power,
-	.check_uart_path = check_uart_path,
-	.register_cb = sec_keyboard_register_cb,
-	.wakeup_key = NULL,
+static struct dock_keyboard_platform_data kbd_pdata {
+        .enable= ,
+        .disable= ,
+        .register_cb =sec_keyboard_register_callbacks,
 };
 
 static struct platform_device sec_keyboard = {
-	.name	= "sec_keyboard",
-	.id	= -1,
-	.dev = {
-		.platform_data = &kbd_pdata,
-	}
+        .name   = "sec_keyboard",
+        .id     = -1,
+        .dev = {
+                .platform_data = &kbd_pdata,
+        }
 };
+
+static struct uart_platform_data uart_pdata {
+        .send_to_keyboard =uart_to_keyboard,
+};
+
+#else
+static int dock_wakeup(void)
+{
+        unsigned long status =
+               readl(IO_ADDRESS(TEGRA_PMC_BASE) + PMC_WAKE_STATUS);
+
+       if (status & TEGRA_WAKE_GPIO_PI5) {
+                writel(TEGRA_WAKE_GPIO_PI5,
+                       IO_ADDRESS(TEGRA_PMC_BASE) + PMC_WAKE_STATUS);
+       }
+
+       return status & TEGRA_WAKE_GPIO_PI5 ? KEY_WAKEUP : KEY_RESERVED;
+}
+
+static struct dock_keyboard_platform_data kbd_pdata = {
+        .acc_power = tegra_acc_power,
+        .wakeup_key = dock_wakeup,
+        .accessory_irq_gpio = GPIO_ACCESSORY_INT,
+};
+
+static struct platform_device sec_keyboard = {
+        .name   = "sec_keyboard",
+        .id     = -1,
+        .dev = {
+                .platform_data = &kbd_pdata,
+        }
+};
+#endif
 #endif
 
 #ifdef CONFIG_30PIN_CONN
@@ -1114,9 +1155,6 @@ struct acc_con_platform_data acc_con_pdata = {
 	.otg_en = tegra_otg_en,
 	.acc_power = tegra_acc_power,
 	.usb_ldo_en = tegra_usb_ldo_en,
-#ifdef CONFIG_SEC_KEYBOARD_DOCK
-	.check_keyboard = check_sec_keyboard_dock,
-#endif
 	.accessory_irq_gpio = GPIO_ACCESSORY_INT,
 	.dock_irq_gpio = GPIO_DOCK_INT,
 	.mhl_irq_gpio = GPIO_MHL_INT,
@@ -1626,7 +1664,7 @@ static struct mxt_platform_data p3_touch_platform_data = {
 	.noise_suppression_config.reserved4 = 0,
 	.noise_suppression_config.reserved5 = 0,
 	.noise_suppression_config.reserved6 = 0,
-	.noise_suppression_config.noisethr = 40,
+	.noise_suppression_config.noisethr = 30,
 	.noise_suppression_config.reserved7 = 0,/*1;*/
 	.noise_suppression_config.freqhopscale = 0,
 	.noise_suppression_config.freq[0] = 10,
@@ -1654,7 +1692,7 @@ static struct mxt_platform_data p3_touch_platform_data = {
 	.palmsupression_config.reserved1 = 0,
 	.palmsupression_config.reserved2 = 0,
 	/* 40 -> 20(For PalmSuppression detect) */
-	.palmsupression_config.largeobjthr = 20,
+	.palmsupression_config.largeobjthr = 10,
 	/* 5 -> 50(For PalmSuppression detect) */
 	.palmsupression_config.distancethr = 50,
 	.palmsupression_config.supextto = 5,
@@ -1671,27 +1709,27 @@ static struct mxt_platform_data p3_touch_platform_data = {
 	.movefilter_for_fherr = 0x57,
 	.jumplimit_for_fherr = 30,
 	.freqhopscale_for_fherr = 1,
-	.freq_for_fherr1[0] = 45,
-	.freq_for_fherr1[1] = 49,
-	.freq_for_fherr1[2] = 55,
-	.freq_for_fherr1[3] = 59,
-	.freq_for_fherr1[4] = 63,
-	.freq_for_fherr2[0] = 10,
-	.freq_for_fherr2[1] = 12,
-	.freq_for_fherr2[2] = 18,
-	.freq_for_fherr2[3] = 40,
-	.freq_for_fherr2[4] = 72,
+	.freq_for_fherr1[0] = 10,
+	.freq_for_fherr1[1] = 12,
+	.freq_for_fherr1[2] = 18,
+	.freq_for_fherr1[3] = 40,
+	.freq_for_fherr1[4] = 72,
+	.freq_for_fherr2[0] = 45,
+	.freq_for_fherr2[1] = 49,
+	.freq_for_fherr2[2] = 55,
+	.freq_for_fherr2[3] = 59,
+	.freq_for_fherr2[4] = 63,
 	.freq_for_fherr3[0] = 7,
 	.freq_for_fherr3[1] = 33,
 	.freq_for_fherr3[2] = 39,
 	.freq_for_fherr3[3] = 52,
 	.freq_for_fherr3[4] = 64,
 	.fherr_cnt_no_ta = 0,
-	.fherr_chg_cnt_no_ta = 10,
+	.fherr_chg_cnt_no_ta = 1,
 	.tch_blen_for_fherr_no_ta = 0,
-	.tchthr_for_fherr_no_ta = 30,
+	.tchthr_for_fherr_no_ta = 45,
 	.movfilter_fherr_no_ta = 0,
-	.noisethr_for_fherr_no_ta = 25,
+	.noisethr_for_fherr_no_ta = 40,
 #ifdef MXT_CALIBRATE_WORKAROUND
 	/*autocal config at idle status*/
 	.atchcalst_idle = 9,
@@ -1701,6 +1739,7 @@ static struct mxt_platform_data p3_touch_platform_data = {
 	.atchcalfrcratio_idle = 55,
 #endif
 };
+
 static const struct i2c_board_info sec_i2c_touch_info[] = {
 	{
 		I2C_BOARD_INFO("sec_touch", 0x4c),
