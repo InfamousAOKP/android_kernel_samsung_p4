@@ -10,9 +10,9 @@ MACKAY_VER="Mackay_1.1"
 
 export ARCH=arm
 export LOCALVERSION="-"`echo $MACKAY_VER`
-export CROSS_COMPILE=/home/kasper/android/cm101/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin/arm-eabi-
+export CROSS_COMPILE=/home/kasper/android/cm102/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin/arm-eabi-
 
-BASE_DIR=/home/kasper/android/cm101/kernel/samsung
+BASE_DIR=/home/kasper/android/cm102/kernel/samsung
 SOURCE_DIR=`echo $BASE_DIR`/p4
 OUTPUT_DIR=`echo $BASE_DIR`/output/galaxytab
 KERNEL_DIR=`echo $OUTPUT_DIR`/kernel
