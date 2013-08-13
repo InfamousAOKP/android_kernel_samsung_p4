@@ -22,6 +22,7 @@
  *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+//#define FIX_CHIP_HANG don't need to define it, just do the fix
 #define	DEBUG_INFO      1
 #define	DEBUG_VERBOSE   2
 #define	DEBUG_MESSAGES  5
@@ -2539,6 +2540,10 @@ static struct attribute_group maxtouch_attr_group = {
 /* Initialization of driver                                                   */
 /******************************************************************************/
 
+//#ifdef FIX_CHIP_HANG
+extern int mxt_do_firmware_load(struct mxt_data *mxt, const char *fn);
+
+
 static int __devinit mxt_identify(struct i2c_client *client,
 				  struct mxt_data *mxt)
 {
@@ -2557,6 +2562,20 @@ retry_i2c:
 	if (mxt->read_fail_counter == 1) {
 		printk(KERN_DEBUG "Warning: To wake up touch-ic in deep sleep, retry i2c communication!");
 		msleep(30);
+		goto retry_i2c;
+	}
+//#ifdef FIX_CHIP_HANG
+	/* If we tried twice and no response, maybe it's in firmware
+ 	 * load mode. Try to upload firmware.
+ 	 */
+	if (mxt->read_fail_counter == 2) {
+		printk(KERN_DEBUG "Trying firmware reload.");
+		mxt->last_read_addr = -1;
+
+		mxt_do_firmware_load(mxt, MXT1386_FIRMWARE);
+
+		reset_chip(mxt, RESET_TO_NORMAL);
+		msleep(300);
 		goto retry_i2c;
 	}
 		dev_err(&client->dev, "Failure accessing maXTouch device\n");
