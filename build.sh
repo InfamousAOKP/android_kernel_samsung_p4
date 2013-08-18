@@ -6,7 +6,7 @@
 # Set basic parameters
 DATE_START=$(date +"%s")
 
-INFAMOUS_VER="Infamous_JB43_1.0"
+INFAMOUS_VER="Infamous_JB43_SE_2.4"
 
 export ARCH=arm
 export LOCALVERSION="-"`echo $INFAMOUS_VER`
